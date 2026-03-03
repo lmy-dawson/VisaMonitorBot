@@ -13,6 +13,11 @@ from .config import settings
 # Convert database URL for async
 DATABASE_URL = settings.DATABASE_URL
 
+# Log which database we're connecting to (hide password)
+import re
+safe_url = re.sub(r':([^@]+)@', ':****@', DATABASE_URL)
+print(f"Connecting to database: {safe_url}")
+
 # Supabase uses postgres:// but SQLAlchemy needs postgresql://
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
@@ -47,15 +52,8 @@ if DATABASE_URL.startswith("sqlite:///"):
     )
 elif DATABASE_URL.startswith("postgresql://"):
     ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
-    # Add SSL requirement for Supabase
-    connect_args = {}
-    if "supabase" in DATABASE_URL or "pooler.supabase" in DATABASE_URL:
-        # Supabase requires SSL
-        import ssl
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-        connect_args = {"ssl": ssl_context}
+    # For Supabase and other cloud PostgreSQL, use SSL
+    connect_args = {"ssl": "require"} if ("supabase" in DATABASE_URL or "neon" in DATABASE_URL) else {}
     
     sync_engine = create_engine(
         DATABASE_URL,
