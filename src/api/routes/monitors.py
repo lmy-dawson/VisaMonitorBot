@@ -142,14 +142,22 @@ async def create_monitor(
             detail="Custom URL is required for custom embassy type"
         )
     
+    # Strip timezone from dates (PostgreSQL expects naive datetime)
+    date_from = monitor_data.preferred_date_from
+    date_to = monitor_data.preferred_date_to
+    if date_from and date_from.tzinfo:
+        date_from = date_from.replace(tzinfo=None)
+    if date_to and date_to.tzinfo:
+        date_to = date_to.replace(tzinfo=None)
+    
     # Create monitor
     new_monitor = Monitor(
         user_id=current_user.id,
         embassy=monitor_data.embassy,
         custom_url=monitor_data.custom_url,
         visa_type=monitor_data.visa_type,
-        preferred_date_from=monitor_data.preferred_date_from,
-        preferred_date_to=monitor_data.preferred_date_to,
+        preferred_date_from=date_from,
+        preferred_date_to=date_to,
     )
     
     db.add(new_monitor)
