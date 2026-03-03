@@ -128,10 +128,14 @@ class VisaMonitorScheduler:
                 # Update scraper health
                 self._update_scraper_health(db, embassy, result)
                 
-                # Update monitor status
-                check_status = "success" if result.success else f"error: {result.error_message[:50]}"
+                # Update monitor status (truncate to 50 chars for DB column)
                 if result.success and result.slots_available:
                     check_status = "slots_found"
+                elif result.success:
+                    check_status = "success"
+                else:
+                    check_status = f"error: {result.error_message or 'unknown'}"
+                check_status = check_status[:50]
                 self._update_monitors_status(db, embassy, check_status)
                 
                 # If slots available, send alerts
@@ -200,14 +204,15 @@ class VisaMonitorScheduler:
                     else:
                         monitor.last_check_status = "success"
                 else:
-                    monitor.last_check_status = f"error: {result.error_message[:50] if result.error_message else 'unknown'}"
+                    err = result.error_message or 'unknown'
+                    monitor.last_check_status = f"error: {err}"[:50]
                 
                 db.commit()
                 
             except Exception as e:
                 logger.error(f"Error checking custom monitor {monitor.id}: {str(e)}")
                 monitor.last_checked_at = datetime.utcnow()
-                monitor.last_check_status = f"error: {str(e)[:50]}"
+                monitor.last_check_status = f"error: {str(e)}"[:50]
                 db.commit()
     
     async def _send_alert_for_custom_monitor(self, db: Session, monitor: Monitor, result: AvailabilityResult):

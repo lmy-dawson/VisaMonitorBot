@@ -17,8 +17,8 @@ router = APIRouter(prefix="/monitors", tags=["monitors"])
 
 # Plan limits
 PLAN_LIMITS = {
-    PlanType.FREE: 1,
-    PlanType.PRO: 3,
+    PlanType.FREE: 3,
+    PlanType.PRO: 10,
     PlanType.AGENT: 999,  # Unlimited for agents
 }
 
@@ -114,12 +114,13 @@ async def create_monitor(
     
     plan_limit = PLAN_LIMITS.get(current_user.plan, 1)
     
-    if active_monitors >= plan_limit:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Monitor limit reached for {current_user.plan.value} plan. "
-                   f"Upgrade to add more monitors."
-        )
+    # TODO: Re-enable plan limits after testing
+    # if active_monitors >= plan_limit:
+    #     raise HTTPException(
+    #         status_code=status.HTTP_403_FORBIDDEN,
+    #         detail=f"Monitor limit reached for {current_user.plan.value} plan. "
+    #                f"Upgrade to add more monitors."
+    #     )
     
     # Check for duplicate embassy monitor
     result = await db.execute(
