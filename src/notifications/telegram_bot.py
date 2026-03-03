@@ -48,7 +48,6 @@ class TelegramNotifier:
         if not self.bot_token:
             raise ValueError("Telegram bot token not configured")
         
-        self.bot = Bot(token=self.bot_token)
         self.application = Application.builder().token(self.bot_token).build()
         
         # Register command handlers
@@ -59,6 +58,9 @@ class TelegramNotifier:
         
         # Initialize the application (required for v20+)
         await self.application.initialize()
+        
+        # Get the bot from the application (already initialized)
+        self.bot = self.application.bot
         
         logger.info("Telegram bot initialized")
     
