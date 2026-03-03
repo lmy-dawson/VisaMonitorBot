@@ -5,6 +5,74 @@ const API_BASE = '/api/v1';
 let authToken = localStorage.getItem('authToken');
 let currentUser = null;
 
+// Loading state helpers
+function setButtonLoading(button, loading) {
+    if (loading) {
+        button.classList.add('loading');
+        button.disabled = true;
+        button.dataset.originalText = button.innerHTML;
+    } else {
+        button.classList.remove('loading');
+        button.disabled = false;
+        if (button.dataset.originalText) {
+            button.innerHTML = button.dataset.originalText;
+        }
+    }
+}
+
+function showPageLoader(message = 'Loading...') {
+    let loader = document.getElementById('pageLoader');
+    if (!loader) {
+        loader = document.createElement('div');
+        loader.id = 'pageLoader';
+        loader.className = 'page-loader';
+        loader.innerHTML = `<div class="spinner"></div><p>${message}</p>`;
+        document.body.appendChild(loader);
+    } else {
+        loader.querySelector('p').textContent = message;
+        loader.classList.remove('hidden');
+    }
+}
+
+function hidePageLoader() {
+    const loader = document.getElementById('pageLoader');
+    if (loader) {
+        loader.classList.add('hidden');
+    }
+}
+
+// Toast notifications
+function showToast(message, type = 'info') {
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toastContainer';
+        container.className = 'toast-container';
+        document.body.appendChild(container);
+    }
+    
+    const icons = {
+        success: '✅',
+        error: '❌',
+        info: 'ℹ️'
+    };
+    
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.innerHTML = `
+        <span class="toast-icon">${icons[type] || icons.info}</span>
+        <span class="toast-message">${message}</span>
+    `;
+    
+    container.appendChild(toast);
+    
+    // Auto remove after 4 seconds
+    setTimeout(() => {
+        toast.style.animation = 'toast-in 0.3s ease-out reverse';
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
+}
+
 // Embassy display names
 const EMBASSY_NAMES = {
     'us_accra': '🇺🇸 US Embassy - Accra',
@@ -18,11 +86,7 @@ const EMBASSY_NAMES = {
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
     if (authToken) {
-        loadUserProfile();
-    } else {
-        showLoggedOutState();
-    }
-});
+        showPageLoader('Loading your dashboard...');\n        loadUserProfile();\n    } else {\n        showLoggedOutState();\n    }\n});
 
 // API Helper
 async function apiRequest(endpoint, options = {}) {
@@ -52,6 +116,7 @@ async function apiRequest(endpoint, options = {}) {
 async function handleRegister(event) {
     event.preventDefault();
     const form = event.target;
+    const button = form.querySelector('button[type="submit"]');
     const errorEl = document.getElementById('registerError');
     errorEl.classList.add('hidden');
     
@@ -61,6 +126,8 @@ async function handleRegister(event) {
         phone: form.phone.value || null,
         notification_preference: 'telegram'
     };
+    
+    setButtonLoading(button, true);
     
     try {
         const response = await apiRequest('/users/register', {
@@ -73,26 +140,38 @@ async function handleRegister(event) {
             throw new Error(error.detail || 'Registration failed');
         }
         
+        showToast('Account created! Logging you in...', 'success');
+        
         // Auto-login after registration
         await doLogin(data.email, data.password);
         
     } catch (error) {
         errorEl.textContent = error.message;
         errorEl.classList.remove('hidden');
+        showToast(error.message, 'error');
+    } finally {
+        setButtonLoading(button, false);
     }
 }
 
 async function handleLogin(event) {
     event.preventDefault();
     const form = event.target;
+    const button = form.querySelector('button[type="submit"]');
     const errorEl = document.getElementById('loginError');
     errorEl.classList.add('hidden');
     
+    setButtonLoading(button, true);
+    
     try {
         await doLogin(form.email.value, form.password.value);
+        showToast('Welcome back!', 'success');
     } catch (error) {
         errorEl.textContent = error.message;
         errorEl.classList.remove('hidden');
+        showToast(error.message, 'error');
+    } finally {
+        setButtonLoading(button, false);
     }
 }
 
@@ -138,6 +217,8 @@ async function loadUserProfile() {
     } catch (error) {
         console.error('Failed to load profile:', error);
         logout();
+    } finally {
+        hidePageLoader();
     }
 }
 
@@ -215,10 +296,13 @@ document.querySelectorAll('.modal').forEach(modal => {
 async function handleTelegramSetup(event) {
     event.preventDefault();
     const form = event.target;
+    const button = form.querySelector('button[type="submit"]');
     const errorEl = document.getElementById('telegramError');
     const successEl = document.getElementById('telegramSuccess');
     errorEl.classList.add('hidden');
     successEl.classList.add('hidden');
+    
+    setButtonLoading(button, true);
     
     try {
         const response = await apiRequest('/users/telegram/setup', {
@@ -236,6 +320,7 @@ async function handleTelegramSetup(event) {
             currentUser.telegram_chat_id = form.chat_id.value;
             document.getElementById('telegramBanner').classList.add('hidden');
             document.getElementById('testAlertBanner').classList.remove('hidden');
+            showToast('Telegram connected successfully!', 'success');
             
             setTimeout(() => {
                 closeModals();
@@ -247,15 +332,16 @@ async function handleTelegramSetup(event) {
     } catch (error) {
         errorEl.textContent = error.message;
         errorEl.classList.remove('hidden');
+        showToast(error.message, 'error');
+    } finally {
+        setButtonLoading(button, false);
     }
 }
 
 // Test Alert
 async function sendTestAlert() {
     const btn = event.target;
-    const originalText = btn.textContent;
-    btn.textContent = 'Sending...';
-    btn.disabled = true;
+    setButtonLoading(btn, true);
     
     try {
         const response = await apiRequest('/alerts/test', {
@@ -265,26 +351,28 @@ async function sendTestAlert() {
         const data = await response.json();
         
         if (response.ok) {
-            btn.textContent = '✓ Sent! Check Telegram';
+            setButtonLoading(btn, false);
+            btn.innerHTML = '✓ Sent! Check Telegram';
             btn.classList.add('btn-success');
+            showToast('Test alert sent! Check your Telegram.', 'success');
             // Reload alerts to show the test alert
             loadAlerts();
             setTimeout(() => {
-                btn.textContent = originalText;
+                btn.innerHTML = '🔔 Send Test Alert';
                 btn.classList.remove('btn-success');
-                btn.disabled = false;
             }, 3000);
         } else {
             throw new Error(data.detail || 'Failed to send test alert');
         }
         
     } catch (error) {
-        btn.textContent = '✗ ' + error.message;
+        setButtonLoading(btn, false);
+        btn.innerHTML = '✗ ' + error.message;
         btn.classList.add('btn-danger');
+        showToast(error.message, 'error');
         setTimeout(() => {
-            btn.textContent = originalText;
+            btn.innerHTML = '🔔 Send Test Alert';
             btn.classList.remove('btn-danger');
-            btn.disabled = false;
         }, 3000);
     }
 }
@@ -338,6 +426,7 @@ async function loadMonitors() {
 async function handleAddMonitor(event) {
     event.preventDefault();
     const form = event.target;
+    const button = form.querySelector('button[type="submit"]');
     const errorEl = document.getElementById('monitorError');
     errorEl.classList.add('hidden');
     
@@ -359,6 +448,8 @@ async function handleAddMonitor(event) {
         preferred_date_to: form.date_to.value ? new Date(form.date_to.value).toISOString() : null
     };
     
+    setButtonLoading(button, true);
+    
     try {
         const response = await apiRequest('/monitors', {
             method: 'POST',
@@ -370,6 +461,7 @@ async function handleAddMonitor(event) {
             throw new Error(error.detail || 'Failed to create monitor');
         }
         
+        showToast('Monitor created successfully!', 'success');
         closeModals();
         form.reset();
         document.getElementById('customUrlGroup').style.display = 'none';
@@ -379,35 +471,48 @@ async function handleAddMonitor(event) {
     } catch (error) {
         errorEl.textContent = error.message;
         errorEl.classList.remove('hidden');
+        showToast(error.message, 'error');
+    } finally {
+        setButtonLoading(button, false);
     }
 }
 
 async function pauseMonitor(id) {
+    const btn = event.target;
+    setButtonLoading(btn, true);
     try {
         await apiRequest(`/monitors/${id}/pause`, { method: 'POST' });
+        showToast('Monitor paused', 'info');
         loadMonitors();
     } catch (error) {
-        alert('Failed to pause monitor');
+        showToast('Failed to pause monitor', 'error');
     }
 }
 
 async function resumeMonitor(id) {
+    const btn = event.target;
+    setButtonLoading(btn, true);
     try {
         await apiRequest(`/monitors/${id}/resume`, { method: 'POST' });
+        showToast('Monitor resumed', 'success');
         loadMonitors();
     } catch (error) {
-        alert('Failed to resume monitor');
+        showToast('Failed to resume monitor', 'error');
     }
 }
 
 async function deleteMonitor(id) {
     if (!confirm('Are you sure you want to delete this monitor?')) return;
     
+    const btn = event.target;
+    setButtonLoading(btn, true);
     try {
         await apiRequest(`/monitors/${id}`, { method: 'DELETE' });
+        showToast('Monitor deleted', 'info');
         loadMonitors();
     } catch (error) {
-        alert('Failed to delete monitor');
+        showToast('Failed to delete monitor', 'error');
+        setButtonLoading(btn, false);
     }
 }
 
@@ -453,15 +558,19 @@ async function loadAlerts() {
 }
 
 async function markBooked(id) {
+    const btn = event.target;
+    setButtonLoading(btn, true);
     try {
         await apiRequest(`/alerts/${id}/booked`, {
             method: 'PATCH',
             body: JSON.stringify({ booked: true })
         });
+        showToast('Marked as booked! Congratulations! 🎉', 'success');
         loadAlerts();
         loadMonitors(); // Refresh monitors as they may be paused
     } catch (error) {
-        alert('Failed to mark as booked');
+        showToast('Failed to mark as booked', 'error');
+        setButtonLoading(btn, false);
     }
 }
 
