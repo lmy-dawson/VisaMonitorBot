@@ -57,6 +57,9 @@ class TelegramNotifier:
         self.application.add_handler(CommandHandler("booked", self._booked_handler))
         self.application.add_handler(CommandHandler("status", self._status_handler))
         
+        # Initialize the application (required for v20+)
+        await self.application.initialize()
+        
         logger.info("Telegram bot initialized")
     
     async def _start_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
