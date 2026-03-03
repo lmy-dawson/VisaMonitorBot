@@ -5,7 +5,7 @@ Main entry point for the API server
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -36,6 +36,8 @@ async def lifespan(app: FastAPI):
     Startup: Initialize database, start scheduler
     Shutdown: Stop scheduler, close connections
     """
+    import os
+    
     # Startup
     logger.info("Starting Visa Monitor Bot...")
     
@@ -47,6 +49,16 @@ async def lifespan(app: FastAPI):
     try:
         await telegram_notifier.initialize()
         logger.info("Telegram bot initialized")
+        
+        # Auto-setup webhook if running on Render
+        render_url = os.environ.get("RENDER_EXTERNAL_URL")
+        if render_url:
+            webhook_url = f"{render_url}/api/v1/telegram/webhook"
+            success = await telegram_notifier.set_webhook(webhook_url)
+            if success:
+                logger.info(f"Telegram webhook auto-configured: {webhook_url}")
+            else:
+                logger.warning("Failed to auto-configure Telegram webhook")
     except Exception as e:
         logger.warning(f"Failed to initialize Telegram bot: {e}")
     
@@ -119,6 +131,33 @@ async def health_check():
         "status": "healthy",
         "service": "visa-monitor-bot",
     }
+
+
+@app.post("/api/v1/telegram/webhook")
+async def telegram_webhook(request: Request):
+    """Webhook endpoint for Telegram bot updates"""
+    try:
+        update_data = await request.json()
+        await telegram_notifier.process_update(update_data)
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"Webhook error: {str(e)}")
+        return {"ok": False}
+
+
+@app.get("/api/v1/telegram/setup-webhook")
+async def setup_telegram_webhook():
+    """Setup the Telegram webhook (call once after deployment)"""
+    # Get the app URL from environment or construct it
+    import os
+    app_url = os.environ.get("RENDER_EXTERNAL_URL", "https://visamonitor.onrender.com")
+    webhook_url = f"{app_url}/api/v1/telegram/webhook"
+    
+    success = await telegram_notifier.set_webhook(webhook_url)
+    if success:
+        return {"status": "success", "webhook_url": webhook_url}
+    else:
+        return {"status": "failed", "message": "Failed to set webhook"}
 
 
 @app.get("/api/v1/embassies")

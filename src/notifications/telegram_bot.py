@@ -205,6 +205,32 @@ Reply /booked when you've booked to stop alerts.
         except TelegramError:
             return False
     
+    async def process_update(self, update_data: dict) -> bool:
+        """Process an incoming webhook update from Telegram"""
+        if not self.application:
+            await self.initialize()
+        
+        try:
+            update = Update.de_json(data=update_data, bot=self.bot)
+            await self.application.process_update(update)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to process update: {str(e)}")
+            return False
+    
+    async def set_webhook(self, webhook_url: str) -> bool:
+        """Set the webhook URL for receiving updates"""
+        if not self.bot:
+            await self.initialize()
+        
+        try:
+            await self.bot.set_webhook(url=webhook_url)
+            logger.info(f"Webhook set to: {webhook_url}")
+            return True
+        except TelegramError as e:
+            logger.error(f"Failed to set webhook: {str(e)}")
+            return False
+    
     def run_polling(self):
         """Start the bot in polling mode (for standalone operation)"""
         if not self.application:

@@ -86,7 +86,12 @@ const EMBASSY_NAMES = {
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
     if (authToken) {
-        showPageLoader('Loading your dashboard...');\n        loadUserProfile();\n    } else {\n        showLoggedOutState();\n    }\n});
+        showPageLoader('Loading your dashboard...');
+        loadUserProfile();
+    } else {
+        showLoggedOutState();
+    }
+});
 
 // API Helper
 async function apiRequest(endpoint, options = {}) {
