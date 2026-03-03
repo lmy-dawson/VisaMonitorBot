@@ -69,6 +69,11 @@ class Monitor(Base):
     visa_type = Column(String(100), nullable=True)  # e.g., "B1/B2", "tourist", "student"
     preferred_date_from = Column(DateTime, nullable=True)
     preferred_date_to = Column(DateTime, nullable=True)
+    # Embassy login credentials (password stored encrypted)
+    embassy_username = Column(String(255), nullable=True)
+    embassy_password = Column(Text, nullable=True)   # Fernet-encrypted
+    login_status = Column(String(50), nullable=True) # login_ok / login_failed / not_set
+    login_verified_at = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
     last_checked_at = Column(DateTime, nullable=True)  # Track last check time
     last_check_status = Column(String(50), nullable=True)  # success/error

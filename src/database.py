@@ -107,9 +107,43 @@ def get_sync_db():
 
 
 async def init_db():
-    """Create all tables"""
+    """Create all tables and apply any pending column migrations."""
+    from sqlalchemy import text
     async with async_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        
+        # Add new columns if they don't exist yet.
+        # SQLite does NOT support "ADD COLUMN IF NOT EXISTS" — so we check first.
+        is_sqlite = DATABASE_URL.startswith("sqlite")
+
+        new_columns = [
+            ("embassy_username", "VARCHAR(255)"),
+            ("embassy_password",  "TEXT"),
+            ("login_status",      "VARCHAR(50)"),
+            ("login_verified_at", "TIMESTAMP"),
+        ]
+
+        if is_sqlite:
+            # Get existing columns via PRAGMA
+            result = await conn.execute(text("PRAGMA table_info(monitors)"))
+            existing = {row[1] for row in result.fetchall()}
+            for col_name, col_type in new_columns:
+                if col_name not in existing:
+                    try:
+                        await conn.execute(
+                            text(f"ALTER TABLE monitors ADD COLUMN {col_name} {col_type}")
+                        )
+                    except Exception:
+                        pass
+        else:
+            # PostgreSQL supports IF NOT EXISTS natively
+            for col_name, col_type in new_columns:
+                try:
+                    await conn.execute(text(
+                        f"ALTER TABLE monitors ADD COLUMN IF NOT EXISTS {col_name} {col_type}"
+                    ))
+                except Exception:
+                    pass
 
 
 async def close_db():

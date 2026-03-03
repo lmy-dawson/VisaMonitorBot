@@ -1,142 +1,218 @@
-"""
-US Embassy Accra scraper - uses the AIS (ais.usvisa-info.com) CGI Federal system
-Monitors appointment availability for US visa appointments in Ghana
+﻿"""
+US Embassy Accra scraper - CGI Federal AIS system (ais.usvisa-info.com)
+Logs in with user credentials and checks available appointment dates.
 """
 import re
 import time
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from datetime import datetime
 import logging
 
 import httpx
+from bs4 import BeautifulSoup
 
 from .base import BaseScraper, AvailabilityResult, ScraperRegistry
-from .stealth import StealthBrowser
 
 logger = logging.getLogger(__name__)
+
+# Known AIS facility IDs
+AIS_FACILITY_ID = {
+    "us_accra": 95,
+    "us_lagos": 94,
+}
 
 
 @ScraperRegistry.register
 class USEmbassyAccraScraper(BaseScraper):
     """
-    Scraper for US Embassy Accra appointment availability.
-    Uses the CGI Federal AIS system at ais.usvisa-info.com
+    Scraper for US Embassy Accra via the AIS system (ais.usvisa-info.com).
+    Requires the user''s AIS account email + password to access the appointment calendar.
     """
-    
+
     EMBASSY_NAME = "us_accra"
-    # Updated URL - ustraveldocs.com redirected to CGI Federal AIS system
-    BASE_URL = "https://ais.usvisa-info.com/en-gh/niv"
-    APPOINTMENT_URL = "https://ais.usvisa-info.com/en-gh/niv"
-    
+    BASE_URL = "https://ais.usvisa-info.com"
+    COUNTRY_CODE = "en-gh"
+    FACILITY_ID = AIS_FACILITY_ID["us_accra"]
+
+    def __init__(self, username: Optional[str] = None, password: Optional[str] = None):
+        super().__init__()
+        self.username = username
+        self.password = password
+
+    @property
+    def sign_in_url(self) -> str:
+        return f"{self.BASE_URL}/{self.COUNTRY_CODE}/niv/users/sign_in"
+
+    @property
+    def dashboard_url(self) -> str:
+        return f"{self.BASE_URL}/{self.COUNTRY_CODE}/niv/"
+
+    def _days_url(self, application_id: int) -> str:
+        return (
+            f"{self.BASE_URL}/{self.COUNTRY_CODE}/niv/schedule/"
+            f"{application_id}/appointment/days/{self.FACILITY_ID}.json"
+            f"?appointments[expedite]=false"
+        )
+
+    async def login(self) -> Tuple[bool, str]:
+        """
+        Log in to the AIS system with stored credentials.
+        Returns (success, message).
+        """
+        if not self.username or not self.password:
+            return False, "No credentials provided"
+
+        browser = await self.get_browser()
+        client = browser.client
+
+        try:
+            # Step 1: GET sign-in page to extract CSRF token
+            resp = await client.get(self.sign_in_url, timeout=30)
+            if resp.status_code != 200:
+                return False, f"Sign-in page returned HTTP {resp.status_code}"
+
+            soup = BeautifulSoup(resp.text, "lxml")
+            csrf_meta = soup.find("meta", {"name": "csrf-token"})
+            if csrf_meta:
+                csrf_token = csrf_meta.get("content", "")
+            else:
+                csrf_input = soup.find("input", {"name": "authenticity_token"})
+                csrf_token = csrf_input["value"] if csrf_input else ""
+
+            # Step 2: POST credentials
+            login_resp = await client.post(
+                self.sign_in_url,
+                data={
+                    "user[email]": self.username,
+                    "user[password]": self.password,
+                    "policy_confirmed": "1",
+                    "commit": "Sign In",
+                    "authenticity_token": csrf_token,
+                },
+                headers={
+                    "Referer": self.sign_in_url,
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                timeout=30,
+                follow_redirects=True,
+            )
+
+            body_lower = login_resp.text.lower()
+            final_url = str(login_resp.url)
+
+            if "invalid email or password" in body_lower or "sign_in" in final_url:
+                return False, "Invalid email or password"
+
+            self.logger.info(f"AIS login successful for {self.username}")
+            return True, "Login successful"
+
+        except httpx.TimeoutException:
+            return False, "Login timed out"
+        except Exception as e:
+            self.logger.error(f"AIS login error: {e}")
+            return False, str(e)[:100]
+
+    async def _get_application_ids(self, client: httpx.AsyncClient) -> List[int]:
+        """Parse dashboard HTML to find active application/schedule IDs."""
+        try:
+            resp = await client.get(self.dashboard_url, timeout=30)
+            matches = re.findall(r"/niv/schedule/(\d+)/", resp.text)
+            return list(set(int(m) for m in matches))
+        except Exception as e:
+            self.logger.warning(f"Could not extract application IDs: {e}")
+            return []
+
+    async def _fetch_available_dates(self, client: httpx.AsyncClient, app_id: int) -> List[str]:
+        """Hit the AIS JSON endpoint for available dates."""
+        try:
+            resp = await client.get(
+                self._days_url(app_id),
+                headers={
+                    "Accept": "application/json, text/javascript, */*; q=0.01",
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Referer": (
+                        f"{self.BASE_URL}/{self.COUNTRY_CODE}/niv"
+                        f"/schedule/{app_id}/appointment"
+                    ),
+                },
+                timeout=20,
+            )
+            if resp.status_code != 200:
+                return []
+
+            data = resp.json()
+            today = datetime.now().date()
+            dates = []
+            for entry in data:
+                if isinstance(entry, dict):
+                    d = entry.get("date", "")
+                    if d:
+                        try:
+                            if datetime.strptime(d, "%Y-%m-%d").date() >= today:
+                                dates.append(d)
+                        except ValueError:
+                            pass
+            return dates
+        except Exception as e:
+            self.logger.warning(f"AIS dates API error: {e}")
+            return []
+
     async def check_availability(self) -> AvailabilityResult:
-        """
-        Check US Embassy Accra (AIS system) for available appointment slots.
-        """
+        """Login then fetch available appointment dates."""
         start_time = time.time()
-        
+
+        if not self.username or not self.password:
+            return self._create_error_result("no_credentials")
+
+        logged_in, login_msg = await self.login()
+        if not logged_in:
+            return self._create_error_result(f"login_failed: {login_msg}"[:50])
+
         try:
             browser = await self.get_browser()
-            await StealthBrowser.random_delay(1, 3)
-            
-            self.logger.info(f"Navigating to {self.APPOINTMENT_URL}")
-            
-            try:
-                content = await browser.goto(self.APPOINTMENT_URL, timeout=30000)
-            except httpx.HTTPStatusError as e:
-                status_code = e.response.status_code
-                if status_code == 403:
-                    self.logger.warning("AIS site returned 403 - bot protection active")
-                    return self._create_error_result("site_blocked_403")
-                elif status_code == 404:
-                    self.logger.warning("AIS site returned 404 - URL may have changed")
-                    return self._create_error_result("site_not_found_404")
-                else:
-                    return self._create_error_result(f"HTTP {status_code}")
-            
-            if not content:
-                return self._create_error_result("empty response")
-            
-            await StealthBrowser.random_delay(1, 2)
-            available_dates = await self.parse_available_dates(content)
+            client = browser.client
+
+            app_ids = await self._get_application_ids(client)
+            if not app_ids:
+                return self._create_success_result(
+                    slots_available=False,
+                    available_dates=[],
+                    raw_response="Login OK - no active applications found",
+                    duration_ms=int((time.time() - start_time) * 1000),
+                )
+
+            all_dates: List[str] = []
+            for app_id in app_ids[:3]:
+                all_dates.extend(await self._fetch_available_dates(client, app_id))
+
+            available_dates = sorted(set(all_dates))
             duration_ms = int((time.time() - start_time) * 1000)
-            slots_available = len(available_dates) > 0
-            
+
             self.logger.info(
-                f"Check complete. Slots available: {slots_available}, "
-                f"Dates found: {len(available_dates)}"
+                f"AIS check done. slots={len(available_dates) > 0}, "
+                f"dates={len(available_dates)}"
             )
-            
             return self._create_success_result(
-                slots_available=slots_available,
-                available_dates=available_dates,
-                raw_response=content[:5000] if content else None,
-                duration_ms=duration_ms
+                slots_available=bool(available_dates),
+                available_dates=list(available_dates),
+                duration_ms=duration_ms,
             )
-            
+
         except httpx.TimeoutException:
-            self.logger.error("Request timed out")
             return self._create_error_result("timeout")
         except Exception as e:
-            self.logger.error(f"Error checking availability: {str(e)}")
-            return self._create_error_result(str(e)[:80])
-    
+            self.logger.error(f"AIS check error: {e}")
+            return self._create_error_result(str(e)[:50])
+
     async def parse_available_dates(self, page_content: str) -> List[str]:
-        """
-        Parse available appointment dates from the AIS page content.
-        The AIS system shows dates in ISO and US formats.
-        """
-        available_dates = []
-        
-        # AIS system date patterns
-        date_patterns = [
-            r'(\d{4}-\d{2}-\d{2})',           # ISO: YYYY-MM-DD
-            r'(\d{1,2}/\d{1,2}/\d{4})',       # US: MM/DD/YYYY
-            r'available["\s:]+(\d{4}-\d{2}-\d{2})',  # Explicit available
-        ]
-        
-        # Check for no-appointment indicators first
-        no_appt_indicators = [
-            "no appointments available",
-            "no available appointments",
-            "currently no appointments",
-            "no slots available",
-            "fully booked",
-            "there are no",
-        ]
-        content_lower = page_content.lower()
-        for indicator in no_appt_indicators:
-            if indicator in content_lower:
-                self.logger.info(f"Found no-appointment indicator: {indicator}")
-                return []
-        
-        for pattern in date_patterns:
-            matches = re.findall(pattern, page_content, re.IGNORECASE)
-            for match in matches:
-                try:
-                    if '-' in match:
-                        date_obj = datetime.strptime(match, "%Y-%m-%d")
-                    elif match.count('/') == 2:
-                        try:
-                            date_obj = datetime.strptime(match, "%m/%d/%Y")
-                        except ValueError:
-                            date_obj = datetime.strptime(match, "%Y/%m/%d")
-                    else:
-                        continue
-                    
-                    if date_obj > datetime.now():
-                        date_str = date_obj.strftime("%Y-%m-%d")
-                        if date_str not in available_dates:
-                            available_dates.append(date_str)
-                except ValueError:
-                    continue
-        
-        return sorted(available_dates)
+        """Not used in authenticated flow - required by ABC."""
+        return []
 
 
 @ScraperRegistry.register
 class USEmbassyLagosScraper(USEmbassyAccraScraper):
-    """Scraper for US Embassy Lagos - uses AIS system for Nigeria"""
-    
+    """Scraper for US Embassy Lagos - same AIS system, Nigeria country code."""
+
     EMBASSY_NAME = "us_lagos"
-    BASE_URL = "https://ais.usvisa-info.com/en-ng/niv"
-    APPOINTMENT_URL = "https://ais.usvisa-info.com/en-ng/niv"
+    COUNTRY_CODE = "en-ng"
+    FACILITY_ID = AIS_FACILITY_ID["us_lagos"]

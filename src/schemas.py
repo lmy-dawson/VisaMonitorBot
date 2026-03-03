@@ -26,6 +26,7 @@ class EmbassyType(str, Enum):
     SCHENGEN_ACCRA = "schengen_accra"
     US_LAGOS = "us_lagos"
     UK_VFS_LAGOS = "uk_vfs_lagos"
+    CUSTOM = "custom"
 
 
 # User schemas
@@ -71,7 +72,8 @@ class MonitorBase(BaseModel):
 
 
 class MonitorCreate(MonitorBase):
-    pass
+    embassy_username: Optional[str] = None   # login email/username for the embassy site
+    embassy_password: Optional[str] = None   # plaintext password (encrypted before storing)
 
 
 class MonitorUpdate(BaseModel):
@@ -87,6 +89,9 @@ class MonitorResponse(MonitorBase):
     id: int
     user_id: int
     is_active: bool
+    embassy_username: Optional[str] = None
+    login_status: Optional[str] = None       # login_ok / login_failed / not_set
+    login_verified_at: Optional[datetime] = None
     last_checked_at: Optional[datetime] = None
     last_check_status: Optional[str] = None
     created_at: datetime

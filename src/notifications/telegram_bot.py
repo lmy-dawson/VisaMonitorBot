@@ -16,11 +16,11 @@ logger = logging.getLogger(__name__)
 
 # Embassy booking URLs
 BOOKING_URLS = {
-    "us_accra": "https://www.ustraveldocs.com/gh/en/step-3/",
-    "us_lagos": "https://www.ustraveldocs.com/ng/en/step-3/",
-    "uk_vfs_accra": "https://www.vfsglobal.co.uk/gh/en/book-appointment",
-    "uk_vfs_lagos": "https://www.vfsglobal.co.uk/ng/en/book-appointment",
-    "schengen_accra": "https://visas-gh.tlscontact.com/",
+    "us_accra": "https://ais.usvisa-info.com/",
+    "us_lagos": "https://ais.usvisa-info.com/",
+    "uk_vfs_accra": "https://atlantis-abs-uk.vfsglobal.com/sign-in",
+    "uk_vfs_lagos": "https://atlantis-abs-uk.vfsglobal.com/sign-in",
+    "schengen_accra": "https://visa.vfsglobal.com/gha/en/fra/",
 }
 
 # Embassy display names

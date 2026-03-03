@@ -12,6 +12,7 @@ from ...database import get_db
 from ...models import User, Monitor, PlanType, EmbassyType
 from ...schemas import MonitorCreate, MonitorUpdate, MonitorResponse
 from ..deps import get_current_user
+from ...utils.crypto import encrypt_password, decrypt_password
 
 router = APIRouter(prefix="/monitors", tags=["monitors"])
 
@@ -152,6 +153,13 @@ async def create_monitor(
         date_to = date_to.replace(tzinfo=None)
     
     # Create monitor
+    enc_password = None
+    if monitor_data.embassy_password:
+        try:
+            enc_password = encrypt_password(monitor_data.embassy_password)
+        except Exception:
+            enc_password = None
+
     new_monitor = Monitor(
         user_id=current_user.id,
         embassy=monitor_data.embassy,
@@ -159,6 +167,9 @@ async def create_monitor(
         visa_type=monitor_data.visa_type,
         preferred_date_from=date_from,
         preferred_date_to=date_to,
+        embassy_username=monitor_data.embassy_username or None,
+        embassy_password=enc_password,
+        login_status="not_set" if not monitor_data.embassy_username else "pending",
     )
     
     db.add(new_monitor)
@@ -316,3 +327,75 @@ async def resume_monitor(
     await db.refresh(monitor)
     
     return monitor
+
+
+@router.post("/{monitor_id}/verify-login")
+async def verify_monitor_login(
+    monitor_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Test the embassy login credentials stored for a monitor.
+    Updates login_status on the monitor and returns the result.
+    """
+    result = await db.execute(
+        select(Monitor).where(
+            Monitor.id == monitor_id,
+            Monitor.user_id == current_user.id,
+        )
+    )
+    monitor = result.scalar_one_or_none()
+
+    if not monitor:
+        raise HTTPException(status_code=404, detail="Monitor not found")
+
+    if not monitor.embassy_username or not monitor.embassy_password:
+        raise HTTPException(
+            status_code=400,
+            detail="No credentials stored for this monitor"
+        )
+
+    # Decrypt password
+    try:
+        plaintext_pw = decrypt_password(monitor.embassy_password)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to decrypt stored password")
+
+    # Import the appropriate scraper
+    from ...scrapers.us_embassy import USEmbassyAccraScraper, USEmbassyLagosScraper
+    from ...scrapers.uk_vfs import UKVFSAccraScraper, UKVFSLagosScraper
+
+    from ...scrapers.schengen import SchengenAccraScraper
+    scraper_map = {
+        EmbassyType.US_ACCRA: USEmbassyAccraScraper,
+        EmbassyType.US_LAGOS: USEmbassyLagosScraper,
+        EmbassyType.UK_VFS_ACCRA: UKVFSAccraScraper,
+        EmbassyType.UK_VFS_LAGOS: UKVFSLagosScraper,
+        EmbassyType.SCHENGEN_ACCRA: SchengenAccraScraper,
+    }
+
+    scraper_class = scraper_map.get(monitor.embassy)
+    if not scraper_class:
+        raise HTTPException(status_code=400, detail="Login not supported for this embassy type")
+
+    # Attempt login
+    try:
+        scraper = scraper_class(username=monitor.embassy_username, password=plaintext_pw)
+        success, message = await scraper.login()
+        await scraper.close()
+    except Exception as e:
+        success, message = False, str(e)[:100]
+
+    # Update login_status on the monitor
+    from datetime import datetime
+    monitor.login_status = "login_ok" if success else "login_failed"
+    monitor.login_verified_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(monitor)
+
+    return {
+        "success": success,
+        "message": message,
+        "login_status": monitor.login_status,
+    }

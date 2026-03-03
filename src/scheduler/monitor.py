@@ -23,6 +23,7 @@ from ..scrapers.uk_vfs import UKVFSAccraScraper, UKVFSLagosScraper
 from ..scrapers.schengen import SchengenAccraScraper
 from ..notifications.telegram_bot import send_telegram_alert
 from ..notifications.whatsapp import send_whatsapp_alert
+from ..utils.crypto import decrypt_password
 
 logger = logging.getLogger(__name__)
 
@@ -92,55 +93,48 @@ class VisaMonitorScheduler:
     
     async def run_monitoring_cycle(self):
         """
-        Main monitoring cycle - runs all active scrapers and sends alerts.
+        Main monitoring cycle - runs scrapers per-monitor so credentials are passed.
         """
         logger.info("Starting monitoring cycle")
         
         db = SessionLocal()
         
         try:
-            # Get all unique embassies being monitored
-            active_embassies = self._get_active_embassies(db)
+            active_monitors = db.query(Monitor).filter(Monitor.is_active == True).all()
             
-            if not active_embassies:
+            if not active_monitors:
                 logger.info("No active monitors, skipping cycle")
                 return
             
-            logger.info(f"Checking {len(active_embassies)} embassies")
+            # Separate custom URL monitors from embassy monitors
+            custom_monitors = [m for m in active_monitors if m.embassy == EmbassyType.CUSTOM]
+            embassy_monitors = [m for m in active_monitors if m.embassy != EmbassyType.CUSTOM]
             
-            for embassy in active_embassies:
-                # Skip CUSTOM embassy type - handled separately
-                if embassy == EmbassyType.CUSTOM:
+            logger.info(f"Checking {len(embassy_monitors)} embassy monitors + {len(custom_monitors)} custom monitors")
+            
+            # Run credential-aware check per monitor
+            for monitor in embassy_monitors:
+                if self._is_scraper_paused(db, monitor.embassy):
+                    monitor.last_check_status = "paused"
+                    monitor.last_checked_at = datetime.utcnow()
+                    db.commit()
                     continue
-                    
-                # Check if scraper is paused
-                if self._is_scraper_paused(db, embassy):
-                    logger.info(f"Scraper for {embassy.value} is paused, skipping")
-                    self._update_monitors_status(db, embassy, "paused")
-                    continue
                 
-                # Run the scraper
-                result = await self._check_embassy(embassy)
+                result = await self._check_monitor(monitor)
                 
-                # Log the result
-                self._log_availability(db, embassy, result)
+                self._log_availability(db, monitor.embassy, result)
+                self._update_scraper_health(db, monitor.embassy, result)
                 
-                # Update scraper health
-                self._update_scraper_health(db, embassy, result)
-                
-                # Update monitor status (truncate to 50 chars for DB column)
+                # Update this monitor's status
+                now = datetime.utcnow()
+                monitor.last_checked_at = now
                 if result.success and result.slots_available:
-                    check_status = "slots_found"
+                    monitor.last_check_status = "slots_found"
+                    await self._send_alerts_for_monitor(db, monitor, result)
                 elif result.success:
-                    check_status = "success"
+                    monitor.last_check_status = "success"
                 else:
-                    check_status = f"error: {result.error_message or 'unknown'}"
-                check_status = check_status[:50]
-                self._update_monitors_status(db, embassy, check_status)
-                
-                # If slots available, send alerts
-                if result.success and result.slots_available:
-                    await self._send_alerts_for_embassy(db, embassy, result)
+                    monitor.last_check_status = f"error: {result.error_message or 'unknown'}"[:50]
                 
                 db.commit()
             
@@ -218,25 +212,22 @@ class VisaMonitorScheduler:
     async def _send_alert_for_custom_monitor(self, db: Session, monitor: Monitor, result: AvailabilityResult):
         """Send alert for a custom URL monitor"""
         user = monitor.user
-        
+
         if not user:
             return
-        
-        # Check notification preference
-        pref = db.query(NotificationPreference).filter(
-            NotificationPreference.user_id == user.id
-        ).first()
-        
-        telegram_id = pref.telegram_chat_id if pref else None
-        
+
+        # telegram_chat_id lives directly on the User model
+        telegram_id = user.telegram_chat_id
+
         if telegram_id:
+            from ..notifications.telegram_bot import telegram_notifier
             message = (
                 f"🔔 Custom URL Monitor Alert!\n\n"
                 f"📍 URL: {monitor.custom_url}\n"
                 f"📝 Potential availability detected\n\n"
                 f"Check the page for appointment slots."
             )
-            await send_telegram_alert(telegram_id, message)
+            await telegram_notifier.send_simple_message(telegram_id, message)
     
     def _is_scraper_paused(self, db: Session, embassy: EmbassyType) -> bool:
         """Check if scraper is paused due to failures"""
@@ -259,33 +250,68 @@ class VisaMonitorScheduler:
         
         return False
     
-    async def _check_embassy(self, embassy: EmbassyType) -> AvailabilityResult:
-        """Run scraper for a specific embassy"""
-        scraper_class = self.scraper_map.get(embassy)
+    async def _check_monitor(self, monitor: Monitor) -> AvailabilityResult:
+        """Run the scraper for a specific monitor, injecting its credentials."""
+        scraper_class = self.scraper_map.get(monitor.embassy)
         
         if not scraper_class:
-            logger.error(f"No scraper found for {embassy.value}")
+            logger.error(f"No scraper for {monitor.embassy.value}")
             return AvailabilityResult(
-                embassy=embassy.value,
+                embassy=monitor.embassy.value,
                 slots_available=False,
                 available_dates=[],
                 error_message="No scraper configured",
-                success=False
+                success=False,
             )
         
+        # Decrypt password if stored
+        password = None
+        if monitor.embassy_password:
+            try:
+                password = decrypt_password(monitor.embassy_password)
+            except Exception:
+                logger.warning(f"Could not decrypt password for monitor {monitor.id}")
+        
         try:
-            async with scraper_class() as scraper:
-                result = await scraper.check_availability()
-                return result
+            # Scrapers for credential-required embassies accept username/password
+            if monitor.embassy in (
+                EmbassyType.US_ACCRA, EmbassyType.US_LAGOS,
+                EmbassyType.UK_VFS_ACCRA, EmbassyType.UK_VFS_LAGOS,
+                EmbassyType.SCHENGEN_ACCRA,
+            ):
+                async with scraper_class(
+                    username=monitor.embassy_username,
+                    password=password,
+                ) as scraper:
+                    return await scraper.check_availability()
+            else:
+                async with scraper_class() as scraper:
+                    return await scraper.check_availability()
         except Exception as e:
-            logger.error(f"Scraper error for {embassy.value}: {str(e)}")
+            logger.error(f"Scraper error for monitor {monitor.id}: {e}")
             return AvailabilityResult(
-                embassy=embassy.value,
+                embassy=monitor.embassy.value,
                 slots_available=False,
                 available_dates=[],
                 error_message=str(e),
-                success=False
+                success=False,
             )
+
+    async def _send_alerts_for_monitor(self, db: Session, monitor: Monitor, result: AvailabilityResult):
+        """Send Telegram/WhatsApp alert for a single monitor."""
+        user = monitor.user
+        if not user:
+            return
+        
+        telegram_id = user.telegram_chat_id
+        
+        if telegram_id:
+            await send_telegram_alert(
+                chat_id=telegram_id,
+                embassy=monitor.embassy.value,
+                available_dates=result.available_dates or [],
+            )
+            logger.info(f"Alert sent to {telegram_id} for {monitor.embassy.value}")
     
     async def _check_custom_url(self, url: str) -> AvailabilityResult:
         """Check a custom URL for appointment availability"""

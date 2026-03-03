@@ -274,22 +274,48 @@
 
     <!-- Add Monitor Modal -->
     <div class="modal hidden" id="monitorModal">
-        <div class="modal-content">
+        <div class="modal-content" style="max-height:92vh; overflow-y:auto;">
             <button class="modal-close" onclick="closeModals()">&times;</button>
             <h2>Add New Monitor</h2>
             <form id="monitorForm" onsubmit="handleAddMonitor(event)">
                 <div class="form-group">
                     <label>Embassy</label>
-                    <select name="embassy" id="embassySelect" required onchange="toggleCustomUrl(this)">
+                    <select name="embassy" id="embassySelect" required onchange="onEmbassyChange(this)">
                         <option value="">Select Embassy...</option>
                         <option value="us_accra">🇺🇸 US Embassy - Accra, Ghana</option>
                         <option value="us_lagos">🇺🇸 US Embassy - Lagos, Nigeria</option>
                         <option value="uk_vfs_accra">🇬🇧 UK Visa (VFS) - Accra, Ghana</option>
                         <option value="uk_vfs_lagos">🇬🇧 UK Visa (VFS) - Lagos, Nigeria</option>
-                        <option value="schengen_accra">🇪🇺 Schengen - Accra, Ghana</option>
+                        <option value="schengen_accra">🇪🇺 Schengen (France/VFS) - Accra, Ghana</option>
                         <option value="custom">🔗 Custom URL - Monitor any page</option>
                     </select>
                 </div>
+
+                <!-- Embassy login credentials (US/UK VFS only) -->
+                <div id="credentialsGroup" style="display:none; background:#f0f7ff; border:1px solid #bfdbfe; border-radius:8px; padding:1rem; margin-bottom:1rem;">
+                    <p style="margin:0 0 0.75rem 0; font-size:0.875rem; color:#1d4ed8; font-weight:600;">
+                        🔐 Embassy Account Login
+                    </p>
+                    <p style="margin:0 0 0.5rem 0; font-size:0.8rem; color:#64748b;">
+                        Enter your credentials for the embassy booking site. The bot will log in on your behalf to check for available appointment dates.
+                    </p>
+                    <div id="noAccountHint" style="margin-bottom:0.75rem; padding:0.6rem 0.75rem; background:#fffbeb; border:1px solid #fde68a; border-radius:6px; font-size:0.8rem; color:#92400e;">
+                        No account yet? 
+                        <a id="createAccountLink" href="#" target="_blank" style="color:#1d4ed8; font-weight:600; text-decoration:underline;">Visit the embassy / VFS website to register →</a>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0.75rem;">
+                        <label>Email / Username</label>
+                        <input type="email" name="embassy_username" id="embassyUsername" placeholder="your@email.com" autocomplete="username">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Password</label>
+                        <input type="password" name="embassy_password" id="embassyPassword" placeholder="••••••••" autocomplete="current-password">
+                    </div>
+                    <small style="display:block; margin-top:0.5rem; color:#64748b; font-size:0.75rem;">
+                        🔒 Your password is encrypted before storage and only used to check appointments.
+                    </small>
+                </div>
+
                 <div class="form-group" id="customUrlGroup" style="display: none;">
                     <label>Custom URL <span style="color: red;">*</span></label>
                     <input type="url" name="custom_url" id="customUrlInput" placeholder="https://example.com/appointments" style="width: 100%; padding: 0.75rem; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 1rem;">

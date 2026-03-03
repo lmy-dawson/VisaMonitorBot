@@ -383,6 +383,36 @@ async function sendTestAlert() {
 }
 
 // Monitors
+function getLoginBadge(monitor) {
+    if (!CREDENTIAL_EMBASSIES.includes(monitor.embassy)) return '';
+    if (!monitor.embassy_username) {
+        return '<div style="margin-top:4px;"><span style="font-size:0.75rem;padding:2px 8px;border-radius:12px;background:#fef3c7;color:#92400e;">⚠️ No credentials</span></div>';
+    }
+    const badges = {
+        login_ok:     '<span style="font-size:0.75rem;padding:2px 8px;border-radius:12px;background:#dcfce7;color:#166534;">✅ Login verified</span>',
+        login_failed: '<span style="font-size:0.75rem;padding:2px 8px;border-radius:12px;background:#fee2e2;color:#991b1b;">❌ Login failed</span>',
+        pending:      '<span style="font-size:0.75rem;padding:2px 8px;border-radius:12px;background:#dbeafe;color:#1d4ed8;">⏳ Verifying...</span>',
+        not_set:      '<span style="font-size:0.75rem;padding:2px 8px;border-radius:12px;background:#fef3c7;color:#92400e;">⚠️ Not verified</span>',
+    };
+    return `<div style="margin-top:4px;">${badges[monitor.login_status] || badges.not_set}</div>`;
+}
+
+async function verifyMonitorLogin(monitorId) {
+    showToast('Testing embassy login...', 'info');
+    try {
+        const response = await apiRequest(`/monitors/${monitorId}/verify-login`, { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            showToast('✅ Login verified successfully!', 'success');
+        } else {
+            showToast(`❌ Login failed: ${data.message}`, 'error');
+        }
+        loadMonitors(); // Refresh to show updated badge
+    } catch (error) {
+        showToast('Failed to verify login', 'error');
+    }
+}
+
 async function loadMonitors() {
     try {
         const response = await apiRequest('/monitors');
@@ -400,7 +430,12 @@ async function loadMonitors() {
         container.classList.remove('hidden');
         empty.classList.add('hidden');
         
-        container.innerHTML = monitors.map(monitor => `
+        container.innerHTML = monitors.map(monitor => {
+            const loginBadge = getLoginBadge(monitor);
+            const verifyBtn = CREDENTIAL_EMBASSIES.includes(monitor.embassy) && monitor.embassy_username
+                ? `<button class="btn btn-outline btn-sm" onclick="verifyMonitorLogin(${monitor.id})" title="Test embassy login">🔐 Verify Login</button>`
+                : '';
+            return `
             <div class="monitor-card ${monitor.is_active ? '' : 'paused'}">
                 <div class="monitor-header">
                     <span class="monitor-embassy">${EMBASSY_NAMES[monitor.embassy] || monitor.embassy}</span>
@@ -412,8 +447,11 @@ async function loadMonitors() {
                     ${monitor.visa_type ? `<div>Visa Type: ${monitor.visa_type}</div>` : ''}
                     ${monitor.preferred_date_from ? `<div>From: ${formatDate(monitor.preferred_date_from)}</div>` : ''}
                     ${monitor.preferred_date_to ? `<div>To: ${formatDate(monitor.preferred_date_to)}</div>` : ''}
+                    ${monitor.embassy_username ? `<div style="font-size:0.8rem;color:#64748b;">Account: ${monitor.embassy_username}</div>` : ''}
+                    ${loginBadge}
                 </div>
                 <div class="monitor-actions">
+                    ${verifyBtn}
                     ${monitor.is_active 
                         ? `<button class="btn btn-outline btn-sm" onclick="pauseMonitor(${monitor.id})">Pause</button>`
                         : `<button class="btn btn-success btn-sm" onclick="resumeMonitor(${monitor.id})">Resume</button>`
@@ -421,7 +459,7 @@ async function loadMonitors() {
                     <button class="btn btn-danger btn-sm" onclick="deleteMonitor(${monitor.id})">Delete</button>
                 </div>
             </div>
-        `).join('');
+        `}).join('');
         
     } catch (error) {
         console.error('Failed to load monitors:', error);
@@ -450,7 +488,9 @@ async function handleAddMonitor(event) {
         custom_url: embassy === 'custom' ? customUrl : null,
         visa_type: form.visa_type.value || null,
         preferred_date_from: form.date_from.value ? new Date(form.date_from.value).toISOString() : null,
-        preferred_date_to: form.date_to.value ? new Date(form.date_to.value).toISOString() : null
+        preferred_date_to: form.date_to.value ? new Date(form.date_to.value).toISOString() : null,
+        embassy_username: form.embassy_username?.value || null,
+        embassy_password: form.embassy_password?.value || null,
     };
     
     setButtonLoading(button, true);
@@ -460,18 +500,36 @@ async function handleAddMonitor(event) {
             method: 'POST',
             body: JSON.stringify(data)
         });
-        
+
+        // Guard: server may return HTML on 500, not JSON
+        let responseData = null;
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+            responseData = await response.json();
+        } else {
+            const text = await response.text();
+            if (!response.ok) {
+                throw new Error(`Server error (${response.status}). Please try again.`);
+            }
+        }
+
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Failed to create monitor');
+            throw new Error(responseData?.detail || 'Failed to create monitor');
         }
         
         showToast('Monitor created successfully!', 'success');
         closeModals();
         form.reset();
         document.getElementById('customUrlGroup').style.display = 'none';
+        document.getElementById('credentialsGroup').style.display = 'none';
         loadMonitors();
         fetchMonitoringStatus();
+        
+        // Auto-verify login if credentials were provided
+        if (responseData && responseData.id && responseData.login_status === 'pending') {
+            showToast('Verifying embassy login...', 'info');
+            setTimeout(() => verifyMonitorLogin(responseData.id), 1500);
+        }
         
     } catch (error) {
         errorEl.textContent = error.message;
@@ -590,20 +648,60 @@ function formatDateTime(dateStr) {
     return new Date(dateStr).toLocaleString();
 }
 
-// Toggle custom URL field
-function toggleCustomUrl(select) {
+// Toggle custom URL / credentials fields based on embassy selection
+const CREDENTIAL_EMBASSIES = ['us_accra', 'us_lagos', 'uk_vfs_accra', 'uk_vfs_lagos', 'schengen_accra'];
+
+function onEmbassyChange(select) {
+    const credGroup = document.getElementById('credentialsGroup');
     const customUrlGroup = document.getElementById('customUrlGroup');
     const customUrlInput = document.getElementById('customUrlInput');
-    
-    if (select.value === 'custom') {
+    const usernameInput = document.getElementById('embassyUsername');
+    const passwordInput = document.getElementById('embassyPassword');
+
+    const val = select.value;
+
+    const CREATE_ACCOUNT_URLS = {
+        // US Embassy AIS — main portal, select Ghana/Nigeria from country list
+        us_accra: { url: 'https://ais.usvisa-info.com/', label: 'Go to US Visa Appointment Service portal →' },
+        us_lagos: { url: 'https://ais.usvisa-info.com/', label: 'Go to US Visa Appointment Service portal →' },
+        // UK VFS — atlantis portal: uses your GOV.UK Reference Number + Email
+        uk_vfs_accra: { url: 'https://atlantis-abs-uk.vfsglobal.com/sign-in', label: 'Go to UK VFS appointment portal (Reference No. + Email) →' },
+        uk_vfs_lagos: { url: 'https://atlantis-abs-uk.vfsglobal.com/sign-in', label: 'Go to UK VFS appointment portal (Reference No. + Email) →' },
+        // Schengen — VFS Global Ghana (France) – book via France-Visas first
+        schengen_accra: { url: 'https://visa.vfsglobal.com/gha/en/fra/', label: 'Go to VFS Global Schengen Ghana (France) site →' },
+    };
+
+    if (CREDENTIAL_EMBASSIES.includes(val)) {
+        credGroup.style.display = 'block';
+        usernameInput.required = true;
+        passwordInput.required = true;
+        customUrlGroup.style.display = 'none';
+        customUrlInput.required = false;
+        customUrlInput.value = '';
+        const acct = CREATE_ACCOUNT_URLS[val] || {};
+        const link = document.getElementById('createAccountLink');
+        if (link && acct.url) {
+            link.href = acct.url;
+            link.textContent = acct.label;
+        }
+    } else if (val === 'custom') {
+        credGroup.style.display = 'none';
+        usernameInput.required = false;
+        passwordInput.required = false;
         customUrlGroup.style.display = 'block';
         customUrlInput.required = true;
     } else {
+        credGroup.style.display = 'none';
         customUrlGroup.style.display = 'none';
+        usernameInput.required = false;
+        passwordInput.required = false;
         customUrlInput.required = false;
         customUrlInput.value = '';
     }
 }
+
+// Keep old name as alias for safety
+function toggleCustomUrl(select) { onEmbassyChange(select); }
 
 // Fetch and display monitoring status
 async function fetchMonitoringStatus() {
