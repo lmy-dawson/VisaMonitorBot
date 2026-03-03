@@ -1,6 +1,8 @@
 """
 Database connection and session management
 """
+import os
+from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -13,6 +15,20 @@ DATABASE_URL = settings.DATABASE_URL
 
 # Handle SQLite vs PostgreSQL
 if DATABASE_URL.startswith("sqlite:///"):
+    # Extract the database file path and ensure directory exists
+    # sqlite:///./file.db (relative) or sqlite:////absolute/path/file.db (absolute)
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if db_path.startswith("/"):
+        # Absolute path (e.g., /opt/render/project/src/data/visa_monitor.db)
+        db_dir = Path(db_path).parent
+    else:
+        # Relative path (e.g., ./visa_monitor.db)
+        db_dir = Path(db_path).parent
+    
+    # Create directory if it doesn't exist
+    if db_dir and str(db_dir) != ".":
+        os.makedirs(db_dir, exist_ok=True)
+        print(f"Ensured database directory exists: {db_dir}")
     # SQLite: use aiosqlite for async
     ASYNC_DATABASE_URL = DATABASE_URL.replace("sqlite:///", "sqlite+aiosqlite:///")
     # SQLite needs check_same_thread=False for async
