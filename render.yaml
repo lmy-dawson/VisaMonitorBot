@@ -6,14 +6,10 @@ services:
     startCommand: uvicorn src.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
-        value: sqlite:////var/data/visa_monitor.db
+        sync: false
       - key: SECRET_KEY
         generateValue: true
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: DEBUG
         value: "false"
-    disk:
-      name: data
-      mountPath: /var/data
-      sizeGB: 1
