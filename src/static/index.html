@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visa Monitor Bot - Never Miss an Appointment</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <!-- Navigation -->
+        <nav class="navbar">
+            <div class="nav-brand">
+                <span class="logo">🎫</span>
+                <span class="brand-name">Visa Monitor</span>
+            </div>
+            <div class="nav-links" id="authNav">
+                <a href="#" onclick="showLogin()" class="btn btn-outline">Login</a>
+                <a href="#" onclick="showRegister()" class="btn btn-primary">Get Started</a>
+            </div>
+            <div class="nav-links hidden" id="userNav">
+                <span class="user-email" id="userEmail"></span>
+                <a href="#" onclick="logout()" class="btn btn-outline">Logout</a>
+            </div>
+        </nav>
+
+        <!-- Hero Section (shown when logged out) -->
+        <section class="hero" id="heroSection">
+            <div class="hero-content">
+                <h1>Never Miss a Visa Appointment Again</h1>
+                <p>Get instant Telegram alerts when embassy slots open. Monitor US, UK, and Schengen visas 24/7.</p>
+                <div class="hero-buttons">
+                    <a href="#" onclick="showRegister()" class="btn btn-primary btn-lg">Start Free Monitoring</a>
+                    <a href="#how-it-works" class="btn btn-outline btn-lg">How It Works</a>
+                </div>
+                <div class="hero-stats">
+                    <div class="stat">
+                        <span class="stat-number">5+</span>
+                        <span class="stat-label">Embassies</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-number">5 min</span>
+                        <span class="stat-label">Check Interval</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-number">Instant</span>
+                        <span class="stat-label">Alerts</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Dashboard (shown when logged in) -->
+        <section class="dashboard hidden" id="dashboard">
+            <div class="dashboard-header">
+                <h2>Your Dashboard</h2>
+                <button onclick="showAddMonitor()" class="btn btn-primary">+ Add Monitor</button>
+            </div>
+
+            <!-- Telegram Setup Banner -->
+            <div class="alert alert-warning hidden" id="telegramBanner">
+                <span>⚠️ Connect your Telegram to receive alerts!</span>
+                <button onclick="showTelegramSetup()" class="btn btn-sm">Setup Now</button>
+            </div>
+
+            <!-- Test Alert Banner (shown when Telegram is connected) -->
+            <div class="alert alert-info hidden" id="testAlertBanner">
+                <span>🔔 Want to test your alerts?</span>
+                <button onclick="sendTestAlert()" class="btn btn-sm btn-primary">Send Test Alert</button>
+            </div>
+
+            <!-- Monitoring Status Section -->
+            <div class="monitoring-status" id="monitoringStatus" style="background: white; border-radius: 8px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 1.5rem; border-left: 4px solid #2563eb;">
+                <div class="status-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h3 style="margin: 0; font-size: 1.1rem;">📡 Monitoring Status</h3>
+                    <span class="status-badge" id="statusBadge" style="padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; background: #fef3c7; color: #92400e;">Checking...</span>
+                </div>
+                <div class="status-details" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem;">
+                    <div class="status-item" style="text-align: center; padding: 0.75rem; background: #f8fafc; border-radius: 8px;">
+                        <span class="status-label" style="display: block; font-size: 0.75rem; color: #64748b; margin-bottom: 0.25rem;">Active Monitors</span>
+                        <span class="status-value" id="activeMonitorsCount" style="display: block; font-size: 1rem; font-weight: 600;">-</span>
+                    </div>
+                    <div class="status-item" style="text-align: center; padding: 0.75rem; background: #f8fafc; border-radius: 8px;">
+                        <span class="status-label" style="display: block; font-size: 0.75rem; color: #64748b; margin-bottom: 0.25rem;">Check Interval</span>
+                        <span class="status-value" id="checkInterval" style="display: block; font-size: 1rem; font-weight: 600;">Every 5 min</span>
+                    </div>
+                    <div class="status-item" style="text-align: center; padding: 0.75rem; background: #f8fafc; border-radius: 8px;">
+                        <span class="status-label" style="display: block; font-size: 0.75rem; color: #64748b; margin-bottom: 0.25rem;">Last Check</span>
+                        <span class="status-value" id="lastCheckTime" style="display: block; font-size: 1rem; font-weight: 600;">-</span>
+                    </div>
+                    <div class="status-item" style="text-align: center; padding: 0.75rem; background: #f8fafc; border-radius: 8px;">
+                        <span class="status-label" style="display: block; font-size: 0.75rem; color: #64748b; margin-bottom: 0.25rem;">Next Check</span>
+                        <span class="status-value" id="nextCheckTime" style="display: block; font-size: 1rem; font-weight: 600;">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Monitors List -->
+            <div class="monitors-section">
+                <h3>Active Monitors</h3>
+                <div class="monitors-grid" id="monitorsList">
+                    <!-- Monitors loaded dynamically -->
+                </div>
+                <div class="empty-state hidden" id="emptyMonitors">
+                    <p>No monitors yet. Add one to start receiving alerts!</p>
+                    <button onclick="showAddMonitor()" class="btn btn-primary">Add Your First Monitor</button>
+                </div>
+            </div>
+
+            <!-- Recent Alerts -->
+            <div class="alerts-section">
+                <h3>Recent Alerts</h3>
+                <div class="alerts-list" id="alertsList">
+                    <!-- Alerts loaded dynamically -->
+                </div>
+                <div class="empty-state hidden" id="emptyAlerts">
+                    <p>No alerts yet. You'll see them here when slots are found.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- How It Works Section -->
+        <section class="how-it-works" id="how-it-works">
+            <h2>How It Works</h2>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <h3>Create Account</h3>
+                    <p>Sign up in seconds with just your email</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <h3>Connect Telegram</h3>
+                    <p>Link your Telegram to receive instant alerts</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <h3>Add Monitor</h3>
+                    <p>Select which embassy you want to track</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">4</div>
+                    <h3>Get Alerts</h3>
+                    <p>Receive instant notification when slots open</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Embassies Section -->
+        <section class="embassies-section">
+            <h2>Supported Embassies</h2>
+            <div class="embassies-grid">
+                <div class="embassy-card">
+                    <span class="flag">🇺🇸</span>
+                    <h4>US Embassy</h4>
+                    <p>Accra & Lagos</p>
+                </div>
+                <div class="embassy-card">
+                    <span class="flag">🇬🇧</span>
+                    <h4>UK Visa (VFS)</h4>
+                    <p>Accra & Lagos</p>
+                </div>
+                <div class="embassy-card">
+                    <span class="flag">🇪🇺</span>
+                    <h4>Schengen</h4>
+                    <p>Accra</p>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Modals -->
+    <!-- Login Modal -->
+    <div class="modal hidden" id="loginModal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeModals()">&times;</button>
+            <h2>Welcome Back</h2>
+            <form id="loginForm" onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" name="email" required placeholder="your@email.com">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" name="password" required placeholder="••••••••">
+                </div>
+                <div class="form-error hidden" id="loginError"></div>
+                <button type="submit" class="btn btn-primary btn-block">Login</button>
+            </form>
+            <p class="modal-footer">Don't have an account? <a href="#" onclick="showRegister()">Sign up</a></p>
+        </div>
+    </div>
+
+    <!-- Register Modal -->
+    <div class="modal hidden" id="registerModal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeModals()">&times;</button>
+            <h2>Create Account</h2>
+            <form id="registerForm" onsubmit="handleRegister(event)">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" name="email" required placeholder="your@email.com">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" name="password" required minlength="8" placeholder="Min 8 characters">
+                </div>
+                <div class="form-group">
+                    <label>Phone (optional)</label>
+                    <input type="tel" name="phone" placeholder="+233...">
+                </div>
+                <div class="form-error hidden" id="registerError"></div>
+                <button type="submit" class="btn btn-primary btn-block">Create Account</button>
+            </form>
+            <p class="modal-footer">Already have an account? <a href="#" onclick="showLogin()">Login</a></p>
+        </div>
+    </div>
+
+    <!-- Telegram Setup Modal -->
+    <div class="modal hidden" id="telegramModal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeModals()">&times;</button>
+            <h2>Connect Telegram</h2>
+            <div class="telegram-steps">
+                <div class="telegram-step">
+                    <span class="step-icon">1</span>
+                    <div>
+                        <strong>Open Telegram</strong>
+                        <p>Search for <code>@VisaSlotAlertBot</code> (or your bot name)</p>
+                    </div>
+                </div>
+                <div class="telegram-step">
+                    <span class="step-icon">2</span>
+                    <div>
+                        <strong>Send /start</strong>
+                        <p>The bot will reply with your Chat ID</p>
+                    </div>
+                </div>
+                <div class="telegram-step">
+                    <span class="step-icon">3</span>
+                    <div>
+                        <strong>Enter Chat ID below</strong>
+                        <p>Copy the number and paste it here</p>
+                    </div>
+                </div>
+            </div>
+            <form id="telegramForm" onsubmit="handleTelegramSetup(event)">
+                <div class="form-group">
+                    <label>Your Telegram Chat ID</label>
+                    <input type="text" name="chat_id" required placeholder="e.g. 123456789">
+                </div>
+                <div class="form-error hidden" id="telegramError"></div>
+                <div class="form-success hidden" id="telegramSuccess"></div>
+                <button type="submit" class="btn btn-primary btn-block">Connect Telegram</button>
+            </form>
+            <div class="test-alert-section" id="testAlertSection" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+                <p style="text-align: center; color: #666; margin-bottom: 10px;">Already connected?</p>
+                <button onclick="sendTestAlert()" class="btn btn-outline btn-block">🔔 Send Test Alert</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Monitor Modal -->
+    <div class="modal hidden" id="monitorModal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeModals()">&times;</button>
+            <h2>Add New Monitor</h2>
+            <form id="monitorForm" onsubmit="handleAddMonitor(event)">
+                <div class="form-group">
+                    <label>Embassy</label>
+                    <select name="embassy" id="embassySelect" required onchange="toggleCustomUrl(this)">
+                        <option value="">Select Embassy...</option>
+                        <option value="us_accra">🇺🇸 US Embassy - Accra, Ghana</option>
+                        <option value="us_lagos">🇺🇸 US Embassy - Lagos, Nigeria</option>
+                        <option value="uk_vfs_accra">🇬🇧 UK Visa (VFS) - Accra, Ghana</option>
+                        <option value="uk_vfs_lagos">🇬🇧 UK Visa (VFS) - Lagos, Nigeria</option>
+                        <option value="schengen_accra">🇪🇺 Schengen - Accra, Ghana</option>
+                        <option value="custom">🔗 Custom URL - Monitor any page</option>
+                    </select>
+                </div>
+                <div class="form-group" id="customUrlGroup" style="display: none;">
+                    <label>Custom URL <span style="color: red;">*</span></label>
+                    <input type="url" name="custom_url" id="customUrlInput" placeholder="https://example.com/appointments" style="width: 100%; padding: 0.75rem; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 1rem;">
+                    <small style="color: #666; display: block; margin-top: 0.5rem;">Enter the exact URL of the appointment page to monitor</small>
+                </div>
+                <div class="form-group">
+                    <label>Visa Type (optional)</label>
+                    <input type="text" name="visa_type" placeholder="e.g. B1/B2, Tourist, Student">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Preferred Date From</label>
+                        <input type="date" name="date_from">
+                    </div>
+                    <div class="form-group">
+                        <label>Preferred Date To</label>
+                        <input type="date" name="date_to">
+                    </div>
+                </div>
+                <div class="form-error hidden" id="monitorError"></div>
+                <button type="submit" class="btn btn-primary btn-block">Start Monitoring</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
