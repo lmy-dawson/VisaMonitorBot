@@ -6,6 +6,7 @@ fastapi==0.109.2
 uvicorn[standard]==0.27.1
 pydantic==2.6.1
 pydantic-settings==2.1.0
+email-validator>=2.0.0
 
 # Database (SQLite)
 sqlalchemy==2.0.25
@@ -18,10 +19,9 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-multipart==0.0.9
 
-# Web Scraping
-playwright==1.41.2
+# Web Scraping (using httpx instead of playwright for cloud compatibility)
 beautifulsoup4==4.12.3
-lxml==5.1.0
+lxml>=5.0.0
 
 # Scheduling
 APScheduler==3.10.4
@@ -34,14 +34,8 @@ twilio==8.13.0
 
 # HTTP Requests
 httpx==0.26.0
-aiohttp==3.9.3
+aiohttp>=3.9.0
 
 # Utilities
 python-dotenv==1.0.1
 aiofiles==23.2.1
-
-# Development
-pytest==7.4.4
-pytest-asyncio==0.23.4
-black==24.1.1
-isort==5.13.2
